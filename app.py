@@ -28,11 +28,13 @@ def formatar_html(texto):
     return texto.strip()
 
 def inverter_linhas(texto_html):
-    padrao = re.compile(r'(<b class="en">.*?</b>)\s*<br\s*/?>\s*(<span class="pt">.*?</span>)', re.IGNORECASE | re.DOTALL)
+    # O radar agora captura a tag inteira (b ou span), não importa se tem "style" ou "class"
+    padrao = re.compile(r'(<b\b[^>]*>.*?</b>)\s*<br\s*/?>\s*(<span\b[^>]*>.*?</span>)', re.IGNORECASE | re.DOTALL)
     return padrao.sub(r'\2<br/>\1', texto_html)
 
 def extrair_portugues(texto_html):
-    sentencas = re.findall(r'(<span class="pt">.*?</span>)', texto_html, re.IGNORECASE | re.DOTALL)
+    # Extrai o conteúdo de qualquer <span> (que é onde o português fica isolado)
+    sentencas = re.findall(r'(<span\b[^>]*>.*?</span>)', texto_html, re.IGNORECASE | re.DOTALL)
     return "<br/>".join(sentencas) + "<br/>"
 
 def gerar_epub_memoria(titulo, html_miolo, css):
@@ -118,6 +120,9 @@ def processar_texto_em_blocos(texto_original, api_key_input, interface_texto):
 # --- INTERFACE WEB STREAMLIT ---
 st.title("📚 Central de Tradução IA")
 st.markdown("Converta livros inteiros em formato bilíngue ou traduza e-mails e artigos rapidamente na tela.")
+
+# Código embutido para remover o aviso de 200MB da tela
+st.markdown("""<style>[data-testid="stFileUploadDropzone"] small {display:none !important;}</style>""", unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("⚙️ Configurações")
