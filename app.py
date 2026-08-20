@@ -23,24 +23,37 @@ if "texto_rapido_pronto" not in st.session_state:
 
 # --- FUNÇÕES DO MOTOR ---
 def formatar_html(texto):
+    # Apenas limpa quebras de linha sujas. Como usamos <p>, não precisamos mais de <br/>
     texto = texto.replace('\n', '')
-    texto = re.sub(r'(<br\s*/?>)+', '<br/>', texto)
     return texto.strip()
 
 def inverter_linhas(texto_html):
-    # O radar agora captura a tag inteira (b ou span), não importa se tem "style" ou "class"
-    padrao = re.compile(r'(<b\b[^>]*>.*?</b>)\s*<br\s*/?>\s*(<span\b[^>]*>.*?</span>)', re.IGNORECASE | re.DOTALL)
-    return padrao.sub(r'\2<br/>\1', texto_html)
+    # Procura os parágrafos em inglês e português e inverte a ordem
+    padrao = re.compile(r'(<p\b[^>]*lang="en"[^>]*>.*?</p>)\s*(<p\b[^>]*lang="pt"[^>]*>.*?</p>)', re.IGNORECASE | re.DOTALL)
+    texto_invertido = padrao.sub(r'\2\n\1', texto_html)
+    
+    # Plano B caso a IA esqueça o lang="en" e use apenas a class="en"
+    if texto_invertido == texto_html:
+        padrao_fallback = re.compile(r'(<p\b[^>]*class="en"[^>]*>.*?</p>)\s*(<p\b[^>]*class="pt"[^>]*>.*?</p>)', re.IGNORECASE | re.DOTALL)
+        texto_invertido = padrao_fallback.sub(r'\2\n\1', texto_html)
+        
+    return texto_invertido
 
 def extrair_portugues(texto_html):
-    # Extrai o conteúdo de qualquer <span> (que é onde o português fica isolado)
-    sentencas = re.findall(r'(<span\b[^>]*>.*?</span>)', texto_html, re.IGNORECASE | re.DOTALL)
-    return "<br/>".join(sentencas) + "<br/>"
+    # Extrai APENAS os parágrafos em português
+    sentencas = re.findall(r'(<p\b[^>]*lang="pt"[^>]*>.*?</p>)', texto_html, re.IGNORECASE | re.DOTALL)
+    if not sentencas:
+        sentencas = re.findall(r'(<p\b[^>]*class="pt"[^>]*>.*?</p>)', texto_html, re.IGNORECASE | re.DOTALL)
+    
+    texto_final = "\n".join(sentencas)
+    
+    # "Lava" a cor verde (style) para que o livro 100% PT fique com o texto preto original
+    texto_final = re.sub(r'style="[^"]*"', '', texto_final)
+    return texto_final
 
 def gerar_epub_memoria(titulo, html_miolo, css):
     epub_buffer = io.BytesIO()
     epub_id = str(uuid.uuid4())
-    miolo_xhtml = html_miolo.replace('<br>', '<br/>')
     
     container_xml = '<?xml version="1.0"?>\n<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n<rootfiles>\n<rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>\n</rootfiles>\n</container>'
     
@@ -62,7 +75,7 @@ def gerar_epub_memoria(titulo, html_miolo, css):
     </navMap>
 </ncx>'''
 
-    # 2. Content OPF (Rebaixado para versão 2.0 e linkando o arquivo NCX)
+    # 2. Content OPF (Padrão 2.0 com mapa NCX)
     content_opf = f'''<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">
     <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
@@ -80,14 +93,13 @@ def gerar_epub_memoria(titulo, html_miolo, css):
     </spine>
 </package>'''
 
-    # 3. XHTML ajustado para o padrão antigo (XHTML 1.1)
+    # 3. XHTML ajustado com Declaração de Idioma (xml:lang e lang)
     xhtml_final = f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="pt-BR" lang="pt-BR">
 <head><title>{titulo}</title><link href="style.css" rel="stylesheet" type="text/css"/></head>
-<body>{miolo_xhtml}</body></html>'''
+<body>{html_miolo}</body></html>'''
 
-    # 4. Zipando tudo com o novo arquivo toc.ncx incluído no pacote
     with zipfile.ZipFile(epub_buffer, 'w', zipfile.ZIP_DEFLATED) as epub:
         epub.writestr('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
         epub.writestr('META-INF/container.xml', container_xml)
@@ -95,20 +107,20 @@ def gerar_epub_memoria(titulo, html_miolo, css):
         epub.writestr('OEBPS/toc.ncx', toc_ncx)
         epub.writestr('OEBPS/style.css', css)
         epub.writestr('OEBPS/content.xhtml', xhtml_final)
-        
     return epub_buffer.getvalue()
 
 def traduzir_bloco(texto, bloco_id, api_key):
     time.sleep(min(bloco_id * 0.5, 5.0)) 
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'}
+    # NOVO PROMPT: Exigindo parágrafos (<p>) e declaração de idioma (lang)
     prompt = """Voce e um tradutor especializado em textos intercalados (ingles ↔ portugues).
 INSTRUCOES OBRIGATORIAS:
 1. Divida o texto em SENTENCAS INDIVIDUAIS.
-2. Formato:
-   <b style="color: #2c3e50;">SENTENCA EM INGLES</b><br/>
-   <span style="color: #27ae60; font-weight: bold;">TRADUCAO EM PORTUGUES</span><br/>
-3. NUNCA agrupe multiplas sentencas em um unico bloco.
-4. OBRIGATÓRIO: Retorne APENAS o código HTML puro."""
+2. Formato OBRIGATORIO para CADA sentenca:
+   <p lang="en" class="en" style="color: #2c3e50; font-weight: bold;">SENTENCA EM INGLES</p>
+   <p lang="pt" class="pt" style="color: #27ae60; font-weight: bold;">TRADUCAO EM PORTUGUES</p>
+3. NUNCA agrupe multiplas sentencas em um unico bloco. Use a estrutura acima para cada frase.
+4. OBRIGATÓRIO: Retorne APENAS o código HTML puro, sem blocos de markdown."""
 
     data = {
         "model": "deepseek/deepseek-chat",
@@ -167,7 +179,7 @@ st.title("📚 Central de Tradução IA")
 st.markdown("Converta livros inteiros em formato bilíngue ou traduza e-mails e artigos rapidamente na tela.")
 
 # Código embutido para remover o aviso de 200MB da tela
-st.markdown("""<style>[data-testid="stFileUploadDropzone"] small {display:none !important;}</style>""", unsafe_allow_html=True)
+st.markdown("""<style>div[data-testid="stFileUploadDropzone"] * { font-size: 16px; } div[data-testid="stFileUploadDropzone"] small { display: none !important; visibility: hidden !important; }</style>""", unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("⚙️ Configurações")
@@ -198,15 +210,13 @@ with aba1:
                 for i in range(1, total + 1):
                     trad = resultados.get(i)
                     if trad:
-                        texto_final_html += formatar_html(trad) + "<br/><br/>"
+                        texto_final_html += formatar_html(trad) + "\n\n"
                 
                 st.session_state.texto_rapido_pronto = texto_final_html
 
-    # Mostrar o resultado colado se estiver pronto na memória
     if st.session_state.texto_rapido_pronto:
         st.success("✅ Tradução concluída!")
         st.markdown("---")
-        # O Streamlit renderiza HTML seguro através do markdown, e definimos as cores inline na função traduzir_bloco
         st.markdown(st.session_state.texto_rapido_pronto, unsafe_allow_html=True)
         st.markdown("---")
         st.caption("Você pode selecionar o texto acima, dar um Ctrl+C e colar no Word ou e-mail.")
@@ -234,22 +244,26 @@ with aba2:
                     for i in range(1, total_blocos + 1):
                         trad = resultados.get(i)
                         if trad:
-                            miolo_en_pt += f'<div class="bloco"><h2>Trecho {i}</h2>{formatar_html(trad)}</div>\n'
-                            miolo_pt_en += f'<div class="bloco"><h2>Trecho {i}</h2>{formatar_html(inverter_linhas(trad))}</div>\n'
-                            miolo_pt += f'<div class="bloco"><h2>Trecho {i}</h2>{extrair_portugues(trad)}</div>\n'
+                            miolo_en_pt += f'<div class="bloco"><h2>Trecho {i}</h2>\n{formatar_html(trad)}\n</div>\n'
+                            miolo_pt_en += f'<div class="bloco"><h2>Trecho {i}</h2>\n{formatar_html(inverter_linhas(trad))}\n</div>\n'
+                            miolo_pt += f'<div class="bloco"><h2>Trecho {i}</h2>\n{extrair_portugues(trad)}\n</div>\n'
 
+                    # CSS base mantido simples, as cores agora vêm da IA nos blocos bilíngues
                     css_base = "body { font-family: sans-serif; font-size: 18px; padding: 20px;} .bloco { padding: 25px; margin: 20px 0;}"
-                    css_en_pt = css_base + ".en { font-weight: 700; color: #2c3e50; } .pt { font-weight: 700; color: #27ae60; }"
-                    css_pt_only = css_base + ".pt { font-weight: 700; color: #2c3e50; }"
 
-                    st.session_state.epub_1 = gerar_epub_memoria("EN-PT", miolo_en_pt, css_en_pt)
-                    st.session_state.epub_2 = gerar_epub_memoria("PT-EN", miolo_pt_en, css_en_pt)
-                    st.session_state.epub_3 = gerar_epub_memoria("PT Somente", miolo_pt, css_pt_only)
+                    st.session_state.epub_1 = gerar_epub_memoria("EN-PT", miolo_en_pt, css_base)
+                    st.session_state.epub_2 = gerar_epub_memoria("PT-EN", miolo_pt_en, css_base)
+                    st.session_state.epub_3 = gerar_epub_memoria("PT Somente", miolo_pt, css_base)
                     st.session_state.epubs_prontos = True
 
     if st.session_state.epubs_prontos:
         st.success("🎉 Arquivos prontos na memória! Faça os downloads abaixo:")
         st.markdown("---")
+        
+        # AVISO PARA OS USUÁRIOS (O DISCLAIMER ELEGANTE)
+        st.info("💡 **Dica de Compatibilidade:** Nossos arquivos são estruturados no padrão universal de acessibilidade. Caso o seu aplicativo de leitura (como o Voice Dream) apresente comportamento inesperado, recomendamos a leitura em plataformas como Apple Books, Calibre, Thorium ou Kindle.")
+        st.markdown("---")
+
         col1, col2, col3 = st.columns(3)
         with col1:
             st.download_button("📘 Baixar (Inglês - Português)", data=st.session_state.epub_1, file_name="01_EN_PT.epub", mime="application/epub+zip")
