@@ -41,16 +41,61 @@ def gerar_epub_memoria(titulo, html_miolo, css):
     epub_buffer = io.BytesIO()
     epub_id = str(uuid.uuid4())
     miolo_xhtml = html_miolo.replace('<br>', '<br/>')
+    
     container_xml = '<?xml version="1.0"?>\n<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n<rootfiles>\n<rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>\n</rootfiles>\n</container>'
-    content_opf = f'''<?xml version="1.0" encoding="UTF-8"?>\n<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="3.0">\n    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n        <dc:title>{titulo}</dc:title>\n        <dc:language>pt-BR</dc:language>\n        <dc:identifier id="BookId">urn:uuid:{epub_id}</dc:identifier>\n    </metadata>\n    <manifest>\n        <item id="style" href="style.css" media-type="text/css"/>\n        <item id="content" href="content.xhtml" media-type="application/xhtml+xml"/>\n    </manifest>\n    <spine>\n        <itemref idref="content"/>\n    </spine>\n</package>'''
-    xhtml_final = f'''<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml">\n<head><title>{titulo}</title><link href="style.css" rel="stylesheet" type="text/css"/></head>\n<body>{miolo_xhtml}</body></html>'''
+    
+    # 1. Arquivo NCX (Índice de navegação exigido pelo EPUB 2 e Voice Dream)
+    toc_ncx = f'''<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+    <head>
+        <meta name="dtb:uid" content="urn:uuid:{epub_id}"/>
+        <meta name="dtb:depth" content="1"/>
+        <meta name="dtb:totalPageCount" content="0"/>
+        <meta name="dtb:maxPageNumber" content="0"/>
+    </head>
+    <docTitle><text>{titulo}</text></docTitle>
+    <navMap>
+        <navPoint id="navPoint-1" playOrder="1">
+            <navLabel><text>Início</text></navLabel>
+            <content src="content.xhtml"/>
+        </navPoint>
+    </navMap>
+</ncx>'''
 
+    # 2. Content OPF (Rebaixado para versão 2.0 e linkando o arquivo NCX)
+    content_opf = f'''<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+        <dc:title>{titulo}</dc:title>
+        <dc:language>pt-BR</dc:language>
+        <dc:identifier id="BookId" opf:scheme="UUID">urn:uuid:{epub_id}</dc:identifier>
+    </metadata>
+    <manifest>
+        <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+        <item id="style" href="style.css" media-type="text/css"/>
+        <item id="content" href="content.xhtml" media-type="application/xhtml+xml"/>
+    </manifest>
+    <spine toc="ncx">
+        <itemref idref="content"/>
+    </spine>
+</package>'''
+
+    # 3. XHTML ajustado para o padrão antigo (XHTML 1.1)
+    xhtml_final = f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>{titulo}</title><link href="style.css" rel="stylesheet" type="text/css"/></head>
+<body>{miolo_xhtml}</body></html>'''
+
+    # 4. Zipando tudo com o novo arquivo toc.ncx incluído no pacote
     with zipfile.ZipFile(epub_buffer, 'w', zipfile.ZIP_DEFLATED) as epub:
         epub.writestr('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
         epub.writestr('META-INF/container.xml', container_xml)
         epub.writestr('OEBPS/content.opf', content_opf)
+        epub.writestr('OEBPS/toc.ncx', toc_ncx)
         epub.writestr('OEBPS/style.css', css)
         epub.writestr('OEBPS/content.xhtml', xhtml_final)
+        
     return epub_buffer.getvalue()
 
 def traduzir_bloco(texto, bloco_id, api_key):
