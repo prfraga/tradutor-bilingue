@@ -1,4 +1,4 @@
- # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import streamlit as st
 import requests
 import time
@@ -7,7 +7,6 @@ import zipfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import io
-import html as html_lib
 
 # --- CONFIGURAÇÕES DA PÁGINA ---
 st.set_page_config(page_title="Tradutor Bilíngue IA", page_icon="📚", layout="wide")
@@ -18,7 +17,6 @@ if "epubs_prontos" not in st.session_state:
     st.session_state.epub_1 = None
     st.session_state.epub_2 = None
     st.session_state.epub_3 = None
-    st.session_state.txt_4 = None  # O Cofre especial para o Voice Dream
 
 if "texto_rapido_pronto" not in st.session_state:
     st.session_state.texto_rapido_pronto = ""
@@ -45,7 +43,7 @@ def extrair_portugues(texto_html):
     
     texto_final = "\n".join(sentencas)
     
-    # A lavagem EXTREMA: arranca estilo e classe, seja qual for a cor ou aspa
+    # A lavagem EXTREMA: arranca estilo e classe para matar o "verdão"
     texto_final = re.sub(r'\s*style=[\'"][^\'"]*[\'"]', '', texto_final)
     texto_final = re.sub(r'\s*class=[\'"][^\'"]*[\'"]', '', texto_final)
     
@@ -230,7 +228,7 @@ with aba2:
                 area_status_livro = st.container()
                 resultados, total_blocos = processar_texto_em_blocos(texto_original, api_key_input, area_status_livro)
                 
-                with st.spinner("Montando os livros e extraindo áudio..."):
+                with st.spinner("Montando os livros..."):
                     miolo_en_pt, miolo_pt_en, miolo_pt = "", "", ""
                     for i in range(1, total_blocos + 1):
                         trad = resultados.get(i)
@@ -244,30 +242,16 @@ with aba2:
                     st.session_state.epub_1 = gerar_epub_memoria("EN-PT", miolo_en_pt, css_base)
                     st.session_state.epub_2 = gerar_epub_memoria("PT-EN", miolo_pt_en, css_base)
                     st.session_state.epub_3 = gerar_epub_memoria("PT Somente", miolo_pt, css_base)
-                    
-                    # 4. A MÁGICA DO VOICE DREAM (TXT PURO)
-                    # Pegamos o miolo PT_EN, transformamos as tags estruturais em quebras de linha e removemos todo o HTML
-                    texto_limpo = miolo_pt_en.replace('</p>', '\n\n').replace('</h2>', '\n\n')
-                    texto_limpo = re.sub(r'<[^>]+>', '', texto_limpo)
-                    st.session_state.txt_4 = html_lib.unescape(texto_limpo).strip()
-                    
                     st.session_state.epubs_prontos = True
 
     if st.session_state.epubs_prontos:
         st.success("🎉 Arquivos prontos na memória! Faça os downloads abaixo:")
         st.markdown("---")
         
-        st.info("💡 **Dica de Acessibilidade:** Se você utiliza aplicativos de leitura contínua em voz alta (TTS) como o **Voice Dream**, recomendamos o formato em **Áudio (TXT)** para um processamento limpo e imediato.")
-        st.markdown("---")
-
-        # AGORA TEMOS 4 COLUNAS
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            st.download_button("📘 (EN-PT)", data=st.session_state.epub_1, file_name="01_EN_PT.epub", mime="application/epub+zip")
+            st.download_button("📘 Baixar (Inglês - Português)", data=st.session_state.epub_1, file_name="01_EN_PT.epub", mime="application/epub+zip")
         with col2:
-            st.download_button("📗 (PT-EN)", data=st.session_state.epub_2, file_name="02_PT_EN.epub", mime="application/epub+zip")
+            st.download_button("📗 Baixar (Português - Inglês)", data=st.session_state.epub_2, file_name="02_PT_EN.epub", mime="application/epub+zip")
         with col3:
-            st.download_button("📕 (Só PT)", data=st.session_state.epub_3, file_name="03_PT_Only.epub", mime="application/epub+zip")
-        with col4:
-            if st.session_state.txt_4:
-                st.download_button("🎧 Áudio (VD)", data=st.session_state.txt_4, file_name="04_VoiceDream.txt", mime="text/plain")
+            st.download_button("📕 Baixar (Só Português)", data=st.session_state.epub_3, file_name="03_PT_Only.epub", mime="application/epub+zip")
